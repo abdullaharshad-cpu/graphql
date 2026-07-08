@@ -4,27 +4,33 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "tsx src/index.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "@apollo/server": "^5.5.1",
-    "@prisma/client": "^7.8.0",
+    "@as-integrations/express4": "^1.1.2",
+    "@prisma/client": "^6.19.3",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "express": "^5.2.1",
-    "graphql": "^16.14.2"
+    "graphql": "^16.14.2",
+    "swagger-jsdoc": "^6.2.13",
+    "swagger-ui-express": "^5.0.0"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^26.1.1",
+    "@types/swagger-ui-express": "^4.1.0",
     "prisma": "^6.19.3",
     "ts-node": "^10.9.2",
+    "tsx": "^4.23.0",
     "typescript": "^6.0.3"
   }
 }
