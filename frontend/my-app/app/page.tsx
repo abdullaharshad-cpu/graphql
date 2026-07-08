@@ -35,8 +35,13 @@ async function graphqlRequest<T>(query: string, variables?: Record<string, unkno
   });
 
   const payload = await response.json();
+  if (!response.ok) {
+    throw new Error("The server could not be reached. Please check that the backend is running.");
+  }
+
   if (payload.errors?.length) {
-    throw new Error(payload.errors[0].message);
+    const message = payload.errors[0]?.message ?? "An unexpected GraphQL error occurred.";
+    throw new Error(message);
   }
 
   return payload.data as T;
@@ -51,27 +56,33 @@ export default function Home() {
   const [postTitle, setPostTitle] = useState("");
   const [commentText, setCommentText] = useState("");
   const [status, setStatus] = useState("Ready to connect to the backend.");
+  const [statusType, setStatusType] = useState<"info" | "success" | "error">("info");
 
   const loadPosts = async () => {
-    const data = await graphqlRequest<{ posts: Post[] }>(`
-      query {
-        posts {
-          id
-          title
-          createdAt
-          author { id name email }
-          comments {
+    try {
+      const data = await graphqlRequest<{ posts: Post[] }>(`
+        query {
+          posts {
             id
-            comment
+            title
             createdAt
-            user { id name }
+            author { id name email }
+            comments {
+              id
+              comment
+              createdAt
+              user { id name }
+            }
           }
         }
+      `);
+      setPosts(data.posts);
+      if (!selectedPostId && data.posts[0]) {
+        setSelectedPostId(data.posts[0].id);
       }
-    `);
-    setPosts(data.posts);
-    if (!selectedPostId && data.posts[0]) {
-      setSelectedPostId(data.posts[0].id);
+    } catch (error) {
+      setStatusType("error");
+      setStatus(error instanceof Error ? error.message : "Unable to load posts right now.");
     }
   };
 
@@ -100,80 +111,121 @@ export default function Home() {
 
   const handleAuth = async (event: FormEvent) => {
     event.preventDefault();
+    if (!authForm.email || !authForm.password || (mode === "signup" && !authForm.name)) {
+      setStatusType("error");
+      setStatus("Please fill in all required fields before continuing.");
+      return;
+    }
+
     setStatus("Authenticating...");
+    setStatusType("info");
 
-    const mutation = mode === "signup"
-      ? `mutation Signup($name: String!, $email: String!, $password: String!) {
-          signup(name: $name, email: $email, password: $password) {
-            success
-            message
-            user { id name email createdAt }
-          }
-        }`
-      : `mutation Login($email: String!, $password: String!) {
-          login(email: $email, password: $password) {
-            success
-            message
-            user { id name email createdAt }
-          }
-        }`;
+    try {
+      const mutation = mode === "signup"
+        ? `mutation Signup($name: String!, $email: String!, $password: String!) {
+            signup(name: $name, email: $email, password: $password) {
+              success
+              message
+              user { id name email createdAt }
+            }
+          }`
+        : `mutation Login($email: String!, $password: String!) {
+            login(email: $email, password: $password) {
+              success
+              message
+              user { id name email createdAt }
+            }
+          }`;
 
-    const variables = mode === "signup"
-      ? { name: authForm.name, email: authForm.email, password: authForm.password }
-      : { email: authForm.email, password: authForm.password };
+      const variables = mode === "signup"
+        ? { name: authForm.name, email: authForm.email, password: authForm.password }
+        : { email: authForm.email, password: authForm.password };
 
-    const data = await graphqlRequest<{ signup?: { success: boolean; message: string }; login?: { success: boolean; message: string } }>(mutation, variables);
-    const result = data.signup ?? data.login;
-    setStatus(result?.message ?? "Auth flow completed.");
-    if (result?.success) {
-      setAuthForm({ name: "", email: "", password: "" });
-      await loadMe();
-      await loadPosts();
+      const data = await graphqlRequest<{ signup?: { success: boolean; message: string }; login?: { success: boolean; message: string } }>(mutation, variables);
+      const result = data.signup ?? data.login;
+      if (result?.success) {
+        setStatusType("success");
+        setStatus(result.message ?? "Auth flow completed.");
+        setAuthForm({ name: "", email: "", password: "" });
+        await loadMe();
+        await loadPosts();
+      } else {
+        setStatusType("error");
+        setStatus(result?.message ?? "Authentication failed.");
+      }
+    } catch (error) {
+      setStatusType("error");
+      setStatus(error instanceof Error ? error.message : "Authentication could not be completed.");
     }
   };
 
   const handleCreatePost = async (event: FormEvent) => {
     event.preventDefault();
-    const data = await graphqlRequest<{ createPost: Post }>(`mutation CreatePost($title: String!) {
-      createPost(title: $title) {
-        id
-        title
-        createdAt
-        author { id name }
-        comments { id comment createdAt user { id name } }
-      }
-    }`, { title: postTitle });
-    setPosts((current) => [data.createPost, ...current]);
-    setPostTitle("");
-    setStatus("Post created successfully.");
+    if (!postTitle.trim()) {
+      setStatusType("error");
+      setStatus("Please enter a post title before publishing.");
+      return;
+    }
+
+    try {
+      const data = await graphqlRequest<{ createPost: Post }>(`mutation CreatePost($title: String!) {
+        createPost(title: $title) {
+          id
+          title
+          createdAt
+          author { id name }
+          comments { id comment createdAt user { id name } }
+        }
+      }`, { title: postTitle });
+      setPosts((current) => [data.createPost, ...current]);
+      setPostTitle("");
+      setStatusType("success");
+      setStatus("Post created successfully.");
+    } catch (error) {
+      setStatusType("error");
+      setStatus(error instanceof Error ? error.message : "Unable to create the post.");
+    }
   };
 
   const handleCreateComment = async (event: FormEvent) => {
     event.preventDefault();
     if (!selectedPostId) {
+      setStatusType("error");
       setStatus("Choose a post before commenting.");
       return;
     }
 
-    const data = await graphqlRequest<{ createComment: Comment }>(`mutation CreateComment($postId: Int!, $comment: String!) {
-      createComment(postId: $postId, comment: $comment) {
-        id
-        comment
-        createdAt
-        user { id name }
-        post { id title }
-      }
-    }`, { postId: selectedPostId, comment: commentText });
+    if (!commentText.trim()) {
+      setStatusType("error");
+      setStatus("Please enter a comment before submitting.");
+      return;
+    }
 
-    setPosts((current) =>
-      current.map((post) =>
-        post.id === selectedPostId
-          ? { ...post, comments: [...post.comments, data.createComment] }
-          : post
-      )
-    );
-    setCommentText("");
-    setStatus("Comment added.");
+    try {
+      const data = await graphqlRequest<{ createComment: Comment }>(`mutation CreateComment($postId: Int!, $comment: String!) {
+        createComment(postId: $postId, comment: $comment) {
+          id
+          comment
+          createdAt
+          user { id name }
+          post { id title }
+        }
+      }`, { postId: selectedPostId, comment: commentText });
+
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === selectedPostId
+            ? { ...post, comments: [...post.comments, data.createComment] }
+            : post
+        )
+      );
+      setCommentText("");
+      setStatusType("success");
+      setStatus("Comment added.");
+    } catch (error) {
+      setStatusType("error");
+      setStatus(error instanceof Error ? error.message : "Unable to add the comment.");
+    }
   };
 
   return (
@@ -236,7 +288,7 @@ export default function Home() {
               </button>
             </form>
 
-            <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-sm text-zinc-400">
+            <div className={`mt-4 rounded-xl border p-3 text-sm ${statusType === "error" ? "border-red-500/40 bg-red-500/10 text-red-300" : statusType === "success" ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300" : "border-zinc-800 bg-zinc-950 text-zinc-400"}`}>
               {status}
             </div>
           </section>
